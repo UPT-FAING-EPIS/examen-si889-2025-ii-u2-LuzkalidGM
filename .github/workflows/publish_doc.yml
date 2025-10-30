@@ -30,7 +30,8 @@ jobs:
         uses: grassedge/generate-plantuml-action@v1.5
         with:
           path: './App'
-          output: './docs/diagrams'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish docs and diagrams to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
