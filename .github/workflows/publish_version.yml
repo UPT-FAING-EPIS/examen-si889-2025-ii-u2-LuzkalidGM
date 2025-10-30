@@ -45,7 +45,7 @@ jobs:
 
       - name: Build project
         run: |
-          dotnet build --configuration Release --no-restore /p:Version=${{ steps.get_version.outputs.VERSION }}
+          dotnet build --configuration Release --no-restore
 
       - name: Run unit tests
         run: |
