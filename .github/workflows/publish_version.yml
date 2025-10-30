@@ -88,12 +88,13 @@ jobs:
 
       - name: Prepare Pages deployment
         run: |
+          rm -rf pages-site
           mkdir -p pages-site
-          cp -r _site/* pages-site/ 2>/dev/null || :
-          cp -r coverage-pages pages-site/coverage-report
-          cp -r Cobertura pages-site/
-          cp disenio.md pages-site/
-          cp index.md pages-site/
+          if [ -d "_site" ]; then cp -r _site/* pages-site/; fi
+          if [ -d "coverage-pages" ]; then cp -r coverage-pages pages-site/coverage-report; fi
+          if [ -d "Cobertura" ]; then cp -r Cobertura pages-site/; fi
+          if [ -f "disenio.md" ]; then cp disenio.md pages-site/; fi
+          if [ -f "index.md" ]; then cp index.md pages-site/; fi
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
