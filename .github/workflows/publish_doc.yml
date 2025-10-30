@@ -1,0 +1,39 @@
+name: Publish Documentation
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-doc-diagram:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Generate XML documentation
+        run: dotnet build --no-restore --configuration Release /p:DocumentationFile=./docs/App.xml
+
+      - name: Generate class diagram (PlantUML)
+        uses: grassedge/generate-plantuml-action@v1
+        with:
+          path: './App'
+          output: './docs/diagrams'
+
+      - name: Publish docs and diagrams to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs
