@@ -1,0 +1,26 @@
+{
+  "metadata": [
+    {
+      "src": [
+        {
+          "files": [ "App/**/*.cs" ]
+        }
+      ],
+      "dest": "api"
+    }
+  ],
+  "build": {
+    "content": [
+      {
+        "files": [ "index.md" ]
+      },
+      {
+        "files": [ "api/**.yml" ]
+      }
+    ],
+    "dest": "_site",
+    "globalMetadata": {
+      "_appTitle": "App Documentation"
+    }
+  }
+}
