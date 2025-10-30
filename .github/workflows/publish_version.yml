@@ -1,4 +1,4 @@
-dotnet testname: Publish Version
+name: Publish Version
 
 on:
   push:
