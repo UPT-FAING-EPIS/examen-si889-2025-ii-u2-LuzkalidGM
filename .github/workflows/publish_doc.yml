@@ -27,7 +27,7 @@ jobs:
         run: dotnet build --no-restore --configuration Release /p:DocumentationFile=./docs/App.xml
 
       - name: Generate class diagram (PlantUML)
-  uses: grassedge/generate-plantuml-action@v1.5
+        uses: grassedge/generate-plantuml-action@v1.5
         with:
           path: './App'
           output: './docs/diagrams'
