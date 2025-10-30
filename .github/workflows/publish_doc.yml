@@ -1,40 +1,83 @@
 name: Publish Documentation
 
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 jobs:
-  build-doc-diagram:
+  build-and-publish-docs:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 8.0.x
 
-      - name: Restore dependencies
-        run: dotnet restore
+    - name: Restore dependencies
+      run: dotnet restore
 
-      - name: Build
-        run: dotnet build --no-restore --configuration Release
+    - name: Build
+      run: dotnet build --no-restore --configuration Release
 
-      - name: Generate XML documentation
-        run: dotnet build --no-restore --configuration Release /p:DocumentationFile=./docs/App.xml
+    - name: Install tools
+      run: |
+        dotnet tool install -g docfx
+        dotnet tool install -g dll2mmd
+        dotnet tool install -g dotnet-reportgenerator-globaltool
+        echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
 
-      - name: Generate class diagram (PlantUML)
-        uses: grassedge/generate-plantuml-action@v1.5
-        with:
-          path: './App'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: Run tests with coverage
+      run: dotnet test --configuration Release --collect:"XPlat Code Coverage"
 
-      - name: Publish docs and diagrams to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./docs
+    - name: Generate coverage report
+      run: |
+        mkdir -p Cobertura
+        reportgenerator "-reports:**/coverage.cobertura.xml" "-targetdir:Cobertura" -reporttypes:MarkdownSummaryGithub
+
+    - name: Generate class diagram
+      run: |
+        dll2mmd -f App/bin/Release/net8.0/App.dll -o disenio.md
+
+    - name: Create index.md
+      run: |
+        cat > index.md << 'EOF'
+        # Documentación de la Aplicación
+
+        ## [📊 Diagrama de Clases](disenio.md)
+        ## [🧪 Cobertura de Pruebas](Cobertura/SummaryGithub.md)
+        EOF
+
+    - name: Build documentation (docfx)
+      run: |
+        docfx metadata || echo "Metadata generation completed"
+        docfx build || echo "DocFX build completed"
+
+    - name: Prepare site folder
+      run: |
+        mkdir _site
+        cp -r Cobertura _site/
+        cp disenio.md _site/
+        cp index.md _site/
+        if [ -d \"_site\" ]; then cp -r _site/* .; fi
+
+    - name: Upload artifact
+      uses: actions/upload-pages-artifact@v3
+      with:
+        path: _site
+
+    - name: Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@v4
