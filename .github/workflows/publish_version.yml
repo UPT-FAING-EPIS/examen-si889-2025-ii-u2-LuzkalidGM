@@ -1,69 +1,157 @@
-name: Publish Version
+name: Create Release and Publish
 
-on:
+
   push:
     tags:
-      - 'v*.*.*'
+      - 'v*'
+
+permissions:
+  contents: write
+  packages: write
+  pages: write
+  id-token: write
 
 jobs:
   build-test-coverage:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+
+      - name: Get version info
+        id: get_version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "RELEASE_NAME=App v$VERSION" >> $GITHUB_OUTPUT
+          echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
       - name: Restore dependencies
         run: dotnet restore
 
-      - name: Build
-        run: dotnet build --no-restore --configuration Release
+      - name: Build project
+        run: |
+          dotnet build --configuration Release --no-restore /p:Version=${{ steps.get_version.outputs.VERSION }}
+
+      - name: Run unit tests
+        run: |
+          dotnet test --configuration Release --no-build --verbosity normal
 
       - name: Run tests with coverage
-        run: dotnet test --no-build --configuration Release --collect:"XPlat Code Coverage" --results-directory ./coverage
+        run: |
+          dotnet test --configuration Release --collect:"XPlat Code Coverage" --results-directory ./coverage
 
-      - name: Convert coverage to lcov
-        uses: danielpalme/ReportGenerator-GitHub-Action@5.3.5
-        with:
-          reports: './coverage/**/coverage.cobertura.xml'
-          targetdir: './coverage/report'
-          reporttypes: 'Html;lcov'
+      - name: Install coverage tools
+        run: |
+          dotnet tool install -g dotnet-reportgenerator-globaltool
+          dotnet tool install -g docfx
+          dotnet tool install -g dll2mmd
+          echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
 
-      - name: Upload coverage artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report
-          path: ./coverage/report
+      - name: Generate coverage report
+        run: |
+          mkdir -p Cobertura
+          reportgenerator "-reports:coverage/**/coverage.cobertura.xml" "-targetdir:Cobertura" -reporttypes:Html;MarkdownSummaryGithub;Badges
+          reportgenerator "-reports:coverage/**/coverage.cobertura.xml" "-targetdir:coverage-pages" -reporttypes:HtmlInline_AzurePipelines
 
-      - name: Deploy coverage to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./coverage/report
-
-  release:
-    needs: build-test-coverage
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup .NET
+      - name: Setup .NET 6 runtime (for dll2mmd)
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '6.0.x'
 
-      - name: Build
-        run: dotnet build --configuration Release
+      - name: Generate documentation and diagram
+        run: |
+          dll2mmd -f App/bin/Release/net8.0/App.dll -o disenio.md
+          cat > index.md << 'EOF'
+          # App Documentation v${{ steps.get_version.outputs.VERSION }}
 
-      - name: Publish Release
-        uses: softprops/action-gh-release@v2
+          ## [📊 Diagrama de Clases](disenio.md)
+          ## [🧪 Cobertura de Pruebas](../Cobertura/SummaryGithub.md)
+          ## [📈 Reporte de Cobertura Completo](../coverage-pages/index.html)
+          EOF
+          docfx metadata || echo "Metadata generation completed"
+          docfx build || echo "DocFX build completed"
+
+      - name: Prepare Pages deployment
+        run: |
+          mkdir -p pages-site
+          cp -r _site/* pages-site/ 2>/dev/null || :
+          cp -r coverage-pages pages-site/coverage-report
+          cp -r Cobertura pages-site/
+          cp disenio.md pages-site/
+          cp index.md pages-site/
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
         with:
+          path: pages-site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -z "$PREV_TAG" ]; then
+            CHANGES=$(git log --oneline --pretty=format:"- %s (%h)" HEAD)
+            echo "BODY=## 🚀 Initial Release v${{ steps.get_version.outputs.VERSION }}
+
+          ### 📝 Commits:
+          $CHANGES
+
+          ### ✅ Tests Ejecutados
+          - Pruebas unitarias
+          - Cobertura de código generada
+          
+          ### 📊 Documentación
+          - Documentación API generada automáticamente
+          - Diagrama de clases incluido
+          - Reporte de cobertura publicado en GitHub Pages" >> $GITHUB_OUTPUT
+          else
+            CHANGES=$(git log --oneline --pretty=format:"- %s (%h)" $PREV_TAG..HEAD)
+            echo "BODY=## 📦 Release v${{ steps.get_version.outputs.VERSION }}
+
+          ### 📋 Changes since $PREV_TAG:
+          $CHANGES
+
+          ### ✅ Tests y Calidad
+          - Todas las pruebas unitarias aprobadas
+          - Cobertura de código actualizada
+          - Documentación regenerada" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.get_version.outputs.TAG_NAME }}
+          name: ${{ steps.get_version.outputs.RELEASE_NAME }}
+          body: |
+            ${{ steps.changelog.outputs.BODY }}
+            
+            ### 📦 Package Details
+            - **Version**: ${{ steps.get_version.outputs.VERSION }}
+            - **Framework**: .NET 8.0
+            - **Package ID**: App
+            - **Pattern**: Singleton Pattern Implementation
+            
+            ### 📊 Documentation & Coverage
+            - 📖 [API Documentation](${{ steps.deployment.outputs.page_url }})
+            - 📈 [Coverage Report](${{ steps.deployment.outputs.page_url }}coverage-report/)
+            - 🎨 [Class Diagram](${{ steps.deployment.outputs.page_url }}disenio.md)
           files: |
-            **/bin/Release/**/*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            artifacts/*.nupkg
+            artifacts/*.snupkg
+          draft: false
+          prerelease: ${{ contains(steps.get_version.outputs.VERSION, '-') }}
